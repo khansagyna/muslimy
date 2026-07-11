@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import axios from "axios";
 
 // --- Assets ---
@@ -13,6 +13,14 @@ import suaraSujud from "./assets/sujud.mp3";
 import suaraDuduk from "./assets/duduk.mp3";
 import horeSound from "./assets/hore.mp3";
 
+// Dipindahkan ke luar agar tidak jadi dependency useEffect
+const questions = [
+  { pose: "berdiri", image: berdiriImg, sound: suaraBerdiri },
+  { pose: "rukuk", image: rukukImg, sound: suaraRukuk },
+  { pose: "sujud", image: sujudImg, sound: suaraSujud },
+  { pose: "duduk", image: dudukImg, sound: suaraDuduk },
+];
+
 function App() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -25,14 +33,7 @@ function App() {
   const [detectedPose, setDetectedPose] = useState("-");
   const [gameFinished, setGameFinished] = useState(false);
 
-  const questions = [
-    { pose: "berdiri", image: berdiriImg, sound: suaraBerdiri },
-    { pose: "rukuk", image: rukukImg, sound: suaraRukuk },
-    { pose: "sujud", image: sujudImg, sound: suaraSujud },
-    { pose: "duduk", image: dudukImg, sound: suaraDuduk },
-  ];
-
-  // --- Logic Audio ---
+  // --- Audio Logic ---
   useEffect(() => {
     if (gameFinished) {
       new Audio(horeSound).play().catch(console.error);
@@ -40,7 +41,7 @@ function App() {
       const audio = new Audio(questions[currentQuestion].sound);
       audio.play().catch(console.error);
     }
-  }, [currentQuestion, gameFinished]); // questions dihapus dari dependency karena sudah statis
+  }, [currentQuestion, gameFinished]);
 
   // --- Camera Logic ---
   const startCamera = async () => {
@@ -52,43 +53,12 @@ function App() {
 
   useEffect(() => { startCamera(); }, []);
 
-  // --- Drawing Logic ---
-  const drawBoxes = (boxes) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const video = videoRef.current;
-    if (!video) return;
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    boxes.forEach((b) => {
-      const { x1, y1, x2, y2 } = b.bbox;
-      let color = "#22C55E";
-      if (b.label === "rukuk") color = "#FACC15";
-      if (b.label === "sujud") color = "#EF4444";
-      if (b.label === "duduk") color = "#3B82F6";
-
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 4;
-      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-      
-      ctx.fillStyle = color;
-      ctx.fillRect(x1, y1 - 30, 100, 30);
-      ctx.fillStyle = "white";
-      ctx.font = "20px Arial";
-      ctx.fillText(b.label.toUpperCase(), x1 + 5, y1 - 8);
-    });
-  };
-
   // --- Game Logic ---
   const resetStabilization = () => {
     axios.post("http://127.0.0.1:5000/reset").catch(() => {});
   };
 
-  const checkAnswer = (label) => {
+  const checkAnswer = useCallback((label) => {
     if (lockedRef.current) return;
     if (label === questions[currentQuestionRef.current].pose) {
       lockedRef.current = true;
@@ -107,9 +77,9 @@ function App() {
         resetStabilization();
       }, 1800);
     }
-  };
+  }, []);
 
-  // Diperbaiki: captureFrame dibungkus useCallback atau dipindahkan ke dalam useEffect
+  // --- AI Capture Logic ---
   useEffect(() => {
     if (gameFinished) return;
     
@@ -130,17 +100,27 @@ function App() {
           const res = await axios.post("http://127.0.0.1:5000/detect", formData);
           if (res.data.success) {
             setDetectedPose(res.data.label);
-            drawBoxes(res.data.detections);
+            
+            // Draw logic
+            const canvas = canvasRef.current;
+            if (canvas) {
+              const ctx = canvas.getContext("2d");
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              res.data.detections.forEach((b) => {
+                const { x1, y1, x2, y2 } = b.bbox;
+                ctx.strokeStyle = "#3B82F6";
+                ctx.lineWidth = 4;
+                ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+              });
+            }
             checkAnswer(res.data.stable_label);
-          } else if (canvasRef.current) {
-            canvasRef.current.getContext("2d").clearRect(0,0, canvasRef.current.width, canvasRef.current.height);
           }
         } catch (err) { console.error("Detect error:", err); }
       }, "image/jpeg");
     }, 800);
     
     return () => clearInterval(interval);
-  }, [gameFinished, currentQuestion]);
+  }, [gameFinished, checkAnswer]);
 
   return (
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "linear-gradient(to bottom, #D9F1FF, #FFF7D6)", fontFamily: "Comic Sans MS", display: "flex", flexDirection: "column" }}>
@@ -155,7 +135,7 @@ function App() {
             <>
               <div style={{ display: "flex", alignItems: "center", gap: "14px", height: "65%" }}>
                 <div style={{ width: "45%", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                  <img src={questions[currentQuestion].image} alt="Pose Gerakan" style={{ width: "100%", maxHeight: "200px", objectFit: "contain" }} />
+                  <img src={questions[currentQuestion].image} alt="Pose" style={{ width: "100%", maxHeight: "200px", objectFit: "contain" }} />
                   <p style={{ fontSize: "9px", color: "#9CA3AF", textAlign: "center", fontStyle: "italic", marginTop: "8px" }}>Sumber: Buku "Anak Soleh Belajar Gerakan dan Bacaan Shalat"</p>
                 </div>
                 <div style={{ flex: 1, textAlign: "center" }}>
