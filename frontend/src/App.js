@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 
 // --- Assets ---
@@ -23,7 +23,6 @@ function App() {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [message, setMessage] = useState("Ayo ikuti gerakannya 😊");
   const [detectedPose, setDetectedPose] = useState("-");
-  const [confidence, setConfidence] = useState("0%");
   const [gameFinished, setGameFinished] = useState(false);
 
   const questions = [
@@ -41,13 +40,13 @@ function App() {
       const audio = new Audio(questions[currentQuestion].sound);
       audio.play().catch(console.error);
     }
-  }, [currentQuestion, gameFinished]);
+  }, [currentQuestion, gameFinished]); // questions dihapus dari dependency karena sudah statis
 
   // --- Camera Logic ---
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
-      videoRef.current.srcObject = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
     } catch (err) { console.error("Camera error:", err); }
   };
 
@@ -59,6 +58,7 @@ function App() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     const video = videoRef.current;
+    if (!video) return;
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -109,33 +109,36 @@ function App() {
     }
   };
 
-  const captureFrame = async () => {
-    const video = videoRef.current;
-    if (!video || video.videoWidth === 0) return;
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = video.videoWidth;
-    tempCanvas.height = video.videoHeight;
-    tempCanvas.getContext("2d").drawImage(video, 0, 0);
-    tempCanvas.toBlob(async (blob) => {
-      const formData = new FormData();
-      formData.append("image", blob, "frame.jpg");
-      try {
-        const res = await axios.post("http://127.0.0.1:5000/detect", formData);
-        if (res.data.success) {
-          setDetectedPose(res.data.label);
-          setConfidence(`${(res.data.confidence * 100).toFixed(1)}%`);
-          drawBoxes(res.data.detections);
-          checkAnswer(res.data.stable_label);
-        } else {
-            canvasRef.current.getContext("2d").clearRect(0,0, canvasRef.current.width, canvasRef.current.height);
-        }
-      } catch (err) { console.error("Detect error:", err); }
-    }, "image/jpeg");
-  };
-
+  // Diperbaiki: captureFrame dibungkus useCallback atau dipindahkan ke dalam useEffect
   useEffect(() => {
     if (gameFinished) return;
-    const interval = setInterval(captureFrame, 800);
+    
+    const interval = setInterval(async () => {
+      const video = videoRef.current;
+      if (!video || video.videoWidth === 0) return;
+      
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = video.videoWidth;
+      tempCanvas.height = video.videoHeight;
+      tempCanvas.getContext("2d").drawImage(video, 0, 0);
+      
+      tempCanvas.toBlob(async (blob) => {
+        if (!blob) return;
+        const formData = new FormData();
+        formData.append("image", blob, "frame.jpg");
+        try {
+          const res = await axios.post("http://127.0.0.1:5000/detect", formData);
+          if (res.data.success) {
+            setDetectedPose(res.data.label);
+            drawBoxes(res.data.detections);
+            checkAnswer(res.data.stable_label);
+          } else if (canvasRef.current) {
+            canvasRef.current.getContext("2d").clearRect(0,0, canvasRef.current.width, canvasRef.current.height);
+          }
+        } catch (err) { console.error("Detect error:", err); }
+      }, "image/jpeg");
+    }, 800);
+    
     return () => clearInterval(interval);
   }, [gameFinished, currentQuestion]);
 
@@ -152,8 +155,8 @@ function App() {
             <>
               <div style={{ display: "flex", alignItems: "center", gap: "14px", height: "65%" }}>
                 <div style={{ width: "45%", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                  <img src={questions[currentQuestion].image} style={{ width: "100%", maxHeight: "200px", objectFit: "contain" }} />
-                  <p style={{ fontSize: "9px", color: "#9CA3AF", textAlign: "center", fontStyle: "italic", marginTop: "8px" }}>Sumber: Buku "Anak Soleh Belajar Gerakan dan Bacaan Shalat" (Penerbit Cikal Aksara, © Nurul Ihsan)</p>
+                  <img src={questions[currentQuestion].image} alt="Pose Gerakan" style={{ width: "100%", maxHeight: "200px", objectFit: "contain" }} />
+                  <p style={{ fontSize: "9px", color: "#9CA3AF", textAlign: "center", fontStyle: "italic", marginTop: "8px" }}>Sumber: Buku "Anak Soleh Belajar Gerakan dan Bacaan Shalat"</p>
                 </div>
                 <div style={{ flex: 1, textAlign: "center" }}>
                   <h2 style={{ color: "#1E40AF", fontSize: "24px" }}>📖 Ikuti Gerakan</h2>
@@ -184,12 +187,6 @@ function App() {
         <div style={{ flex: 1, background: "#000", borderRadius: "24px", overflow: "hidden", position: "relative", boxShadow: "0 5px 14px rgba(0,0,0,0.15)" }}>
           <video ref={videoRef} autoPlay muted playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           <canvas ref={canvasRef} style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
-          {gameFinished && (
-            <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "white" }}>
-              <div style={{ fontSize: "80px" }}>🎊</div>
-              <h2 style={{ fontSize: "32px" }}>SEMUA BERHASIL!</h2>
-            </div>
-          )}
         </div>
       </div>
     </div>
