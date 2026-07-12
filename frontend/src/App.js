@@ -13,7 +13,9 @@ import suaraSujud from "./assets/sujud.mp3";
 import suaraDuduk from "./assets/duduk.mp3";
 import horeSound from "./assets/hore.mp3";
 
-// Dipindahkan ke luar agar tidak jadi dependency useEffect
+// Gunakan URL lokal untuk testing, ganti ke domain publik saat siap deploy
+const BASE_URL = "https://ranop-api.yusufghazali.com"; 
+
 const questions = [
   { pose: "berdiri", image: berdiriImg, sound: suaraBerdiri },
   { pose: "rukuk", image: rukukImg, sound: suaraRukuk },
@@ -53,9 +55,40 @@ function App() {
 
   useEffect(() => { startCamera(); }, []);
 
+  // --- Drawing Logic ---
+  const drawBoxes = (boxes) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const video = videoRef.current;
+    if (!video) return;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    boxes.forEach((b) => {
+      const { x1, y1, x2, y2 } = b.bbox;
+      let color = "#22C55E"; // Hijau
+      if (b.label === "rukuk") color = "#FACC15";
+      if (b.label === "sujud") color = "#EF4444";
+      if (b.label === "duduk") color = "#3B82F6";
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 6;
+      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      
+      ctx.fillStyle = color;
+      ctx.fillRect(x1, y1 - 35, 120, 35);
+      ctx.fillStyle = "white";
+      ctx.font = "bold 18px Arial";
+      ctx.fillText(b.label.toUpperCase(), x1 + 10, y1 - 10);
+    });
+  };
+
   // --- Game Logic ---
   const resetStabilization = () => {
-    axios.post("http://127.0.0.1:5000/reset").catch(() => {});
+    axios.post(`${BASE_URL}/reset`).catch(() => {});
   };
 
   const checkAnswer = useCallback((label) => {
@@ -79,45 +112,39 @@ function App() {
     }
   }, []);
 
-  // --- AI Capture Logic ---
+  // --- AI Capture Logic (Optimized) ---
   useEffect(() => {
     if (gameFinished) return;
     
+    let isProcessing = false;
+
     const interval = setInterval(async () => {
+      if (isProcessing) return;
+      
       const video = videoRef.current;
       if (!video || video.videoWidth === 0) return;
       
+      isProcessing = true;
       const tempCanvas = document.createElement("canvas");
       tempCanvas.width = video.videoWidth;
       tempCanvas.height = video.videoHeight;
       tempCanvas.getContext("2d").drawImage(video, 0, 0);
       
       tempCanvas.toBlob(async (blob) => {
-        if (!blob) return;
+        if (!blob) { isProcessing = false; return; }
         const formData = new FormData();
         formData.append("image", blob, "frame.jpg");
         try {
-          const res = await axios.post("http://127.0.0.1:5000/detect", formData);
+          const res = await axios.post(`${BASE_URL}/detect`, formData);
           if (res.data.success) {
             setDetectedPose(res.data.label);
-            
-            // Draw logic
-            const canvas = canvasRef.current;
-            if (canvas) {
-              const ctx = canvas.getContext("2d");
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              res.data.detections.forEach((b) => {
-                const { x1, y1, x2, y2 } = b.bbox;
-                ctx.strokeStyle = "#3B82F6";
-                ctx.lineWidth = 4;
-                ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-              });
-            }
+            drawBoxes(res.data.detections);
             checkAnswer(res.data.stable_label);
           }
         } catch (err) { console.error("Detect error:", err); }
+        finally { isProcessing = false; }
       }, "image/jpeg");
-    }, 800);
+    }, 500);
     
     return () => clearInterval(interval);
   }, [gameFinished, checkAnswer]);
