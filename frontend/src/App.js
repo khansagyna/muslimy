@@ -14,7 +14,7 @@ import suaraDuduk from "./assets/duduk.mp3";
 import horeSound from "./assets/hore.mp3";
 
 // Gunakan URL lokal untuk testing, ganti ke domain publik saat siap deploy
-const BASE_URL = "https://ranop-api.yusufghazali.com"; 
+const BASE_URL = "https://muslimy-api.yusufghazali.com"; 
 
 const questions = [
   { pose: "berdiri", image: berdiriImg, sound: suaraBerdiri },
@@ -88,7 +88,7 @@ function App() {
 
   // --- Game Logic ---
   const resetStabilization = () => {
-    axios.post(`${BASE_URL}/reset`).catch(() => {});
+    axios.post(`${BASE_URL}/reset`, {}).catch(() => {});
   };
 
   const checkAnswer = useCallback((label) => {
