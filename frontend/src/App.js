@@ -14,7 +14,7 @@ import suaraDuduk from "./assets/duduk.mp3";
 import horeSound from "./assets/hore.mp3";
 
 // Gunakan URL lokal untuk testing, ganti ke domain publik saat siap deploy
-const BASE_URL = "https://muslimy-api.yusufghazali.com"; 
+const BASE_URL = process.env.NODE_ENV === "development" ? "http://127.0.0.1:5000" : "https://muslimy-api.yusufghazali.com"; 
 
 const questions = [
   { pose: "berdiri", image: berdiriImg, sound: suaraBerdiri },
