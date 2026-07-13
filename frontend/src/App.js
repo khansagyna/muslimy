@@ -13,7 +13,6 @@ import suaraSujud from "./assets/sujud.mp3";
 import suaraDuduk from "./assets/duduk.mp3";
 import horeSound from "./assets/hore.mp3";
 
-// Gunakan URL lokal untuk testing, ganti ke domain publik saat siap deploy
 const BASE_URL = process.env.NODE_ENV === "development" ? "http://127.0.0.1:5000" : "https://muslimy-api.yusufghazali.com"; 
 
 const questions = [
@@ -28,6 +27,8 @@ function App() {
   const canvasRef = useRef(null);
   const lockedRef = useRef(false);
   const currentQuestionRef = useRef(0);
+  
+  const poseCountRef = useRef(0);
 
   const [score, setScore] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -35,7 +36,6 @@ function App() {
   const [detectedPose, setDetectedPose] = useState("-");
   const [gameFinished, setGameFinished] = useState(false);
 
-  // --- Audio Logic ---
   useEffect(() => {
     if (gameFinished) {
       new Audio(horeSound).play().catch(console.error);
@@ -45,7 +45,6 @@ function App() {
     }
   }, [currentQuestion, gameFinished]);
 
-  // --- Camera Logic ---
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
@@ -55,7 +54,6 @@ function App() {
 
   useEffect(() => { startCamera(); }, []);
 
-  // --- Drawing Logic ---
   const drawBoxes = (boxes) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -63,13 +61,20 @@ function App() {
     const video = videoRef.current;
     if (!video) return;
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = video.offsetWidth;
+    canvas.height = video.offsetHeight;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     boxes.forEach((b) => {
-      const { x1, y1, x2, y2 } = b.bbox;
-      let color = "#22C55E"; // Hijau
+      const scaleX = canvas.width / 640; 
+      const scaleY = canvas.height / 480;
+
+      const x1 = b.bbox.x1 * scaleX;
+      const y1 = b.bbox.y1 * scaleY;
+      const x2 = b.bbox.x2 * scaleX;
+      const y2 = b.bbox.y2 * scaleY;
+
+      let color = "#22C55E";
       if (b.label === "rukuk") color = "#FACC15";
       if (b.label === "sujud") color = "#EF4444";
       if (b.label === "duduk") color = "#3B82F6";
@@ -86,49 +91,56 @@ function App() {
     });
   };
 
-  // --- Game Logic ---
   const resetStabilization = () => {
     axios.post(`${BASE_URL}/reset`, {}).catch(() => {});
   };
 
   const checkAnswer = useCallback((label) => {
     if (lockedRef.current) return;
+
+    // Logika Buffer: Tidak langsung reset jika salah satu frame meleset
     if (label === questions[currentQuestionRef.current].pose) {
-      lockedRef.current = true;
-      setMessage("🎉 Hebat! Gerakan benar!");
-      setScore((prev) => prev + 25);
-      setTimeout(() => {
-        const next = currentQuestionRef.current + 1;
-        if (next < questions.length) {
-          currentQuestionRef.current = next;
-          setCurrentQuestion(next);
-          setMessage("Ayo ikuti gerakannya 😊");
-        } else {
-          setGameFinished(true);
-        }
-        lockedRef.current = false;
-        resetStabilization();
-      }, 1800);
+      poseCountRef.current += 1;
+    } else {
+      poseCountRef.current = Math.max(0, poseCountRef.current - 1);
     }
+
+    // Threshold: Membutuhkan 5 frame konsisten agar skor masuk
+    if (poseCountRef.current < 2) return;
+
+    lockedRef.current = true;
+    poseCountRef.current = 0;
+    setMessage("🎉 Hebat! Gerakan benar!");
+    setScore((prev) => prev + 25);
+    
+    setTimeout(() => {
+      const next = currentQuestionRef.current + 1;
+      if (next < questions.length) {
+        currentQuestionRef.current = next;
+        setCurrentQuestion(next);
+        setMessage("Ayo ikuti gerakannya 😊");
+      } else {
+        setGameFinished(true);
+      }
+      lockedRef.current = false;
+      resetStabilization();
+    }, 1800);
   }, []);
 
-  // --- AI Capture Logic (Optimized) ---
   useEffect(() => {
     if (gameFinished) return;
     
     let isProcessing = false;
-
     const interval = setInterval(async () => {
       if (isProcessing) return;
-      
       const video = videoRef.current;
       if (!video || video.videoWidth === 0) return;
       
       isProcessing = true;
       const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = video.videoWidth;
-      tempCanvas.height = video.videoHeight;
-      tempCanvas.getContext("2d").drawImage(video, 0, 0);
+      tempCanvas.width = 640; 
+      tempCanvas.height = 480;
+      tempCanvas.getContext("2d").drawImage(video, 0, 0, 640, 480);
       
       tempCanvas.toBlob(async (blob) => {
         if (!blob) { isProcessing = false; return; }
@@ -144,7 +156,7 @@ function App() {
         } catch (err) { console.error("Detect error:", err); }
         finally { isProcessing = false; }
       }, "image/jpeg");
-    }, 500);
+    }, 250);
     
     return () => clearInterval(interval);
   }, [gameFinished, checkAnswer]);
